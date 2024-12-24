@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+
+class SaveIntent extends Intent {
+  const SaveIntent();
+}
 
 void main() {
   runApp(const MyApp());
@@ -9,7 +14,6 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -81,6 +85,64 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return Shortcuts(
+      shortcuts: <LogicalKeySet, Intent>{
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS): const SaveIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          SaveIntent: CallbackAction<SaveIntent>(
+            onInvoke: (SaveIntent intent) {
+              if (_hasChanges) {
+                _saveNotes();
+              }
+              return null;
+            },
+          ),
+        },
+        child: WillPopScope(
+          onWillPop: _onWillPop,
+          child: Scaffold(
+            appBar: AppBar(
+              backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+              title: Text(widget.title),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _addNewItem,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.save),
+                  onPressed: _hasChanges ? () {
+                    _saveNotes();
+                  } : null,
+                ),
+              ],
+            ),
+            body: ListView.builder(
+              itemCount: _items.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: TextField(
+                    controller: _controllers[index],
+                    onChanged: (newValue) {
+                      setState(() {
+                        _items[index] = newValue;
+                        _hasChanges = true;
+                      });
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<bool> _onWillPop() async {
     if (_hasChanges) {
       return (await showDialog(
@@ -110,56 +172,5 @@ class _MyHomePageState extends State<MyHomePage> {
       controller.dispose();
     }
     super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-          title: Text(widget.title),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _addNewItem,
-            ),
-            IconButton(
-              icon: const Icon(Icons.save),
-              onPressed: _hasChanges ? _saveNotes : null,
-            ),
-          ],
-        ),
-        body: FocusScope(
-          child: RawKeyboardListener(
-            focusNode: FocusNode(),
-            onKey: (event) {
-              if (event.isControlPressed && event.logicalKey.keyLabel == 'S') {
-                if (_hasChanges) {
-                  _saveNotes();
-                }
-              }
-            },
-            child: ListView.builder(
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: TextField(
-                    controller: _controllers[index],
-                    onChanged: (newValue) {
-                      setState(() {
-                        _items[index] = newValue;
-                        _hasChanges = true;
-                      });
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

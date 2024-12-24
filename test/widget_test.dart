@@ -7,24 +7,35 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:completion_scheduler/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Add new item and save', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that the initial list is empty.
+    expect(find.byType(ListTile), findsNothing);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    // Tap the '+' icon to add a new item.
+    final addButton = find.byIcon(Icons.add);
+    await tester.tap(addButton);
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify that a new item is added.
+    expect(find.byType(ListTile), findsOneWidget);
+    expect(find.text('<Empty line>'), findsOneWidget);
+
+    // Enter text into the new item.
+    await tester.enterText(find.byType(TextField), 'New Task');
+    await tester.pump();
+
+    // Verify that the text is updated.
+    expect(find.text('New Task'), findsOneWidget);
+
+    // Tap the 'save' icon to save the changes.
+    final saveButton = find.byIcon(Icons.save);
+    await tester.tap(saveButton);
+    await tester.pump();
   });
 }
