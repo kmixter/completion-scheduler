@@ -1,35 +1,74 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:io';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SaveIntent extends Intent {
   const SaveIntent();
 }
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final credentials = await loadCredentials();
+  runApp(MyApp(credentials: credentials));
+}
+
+Future<Map<String, dynamic>> loadCredentials() async {
+  final file = File('assets/client_secret.json');
+  final contents = await file.readAsString();
+  return jsonDecode(contents);
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final Map<String, dynamic> credentials;
+
+  const MyApp({Key? key, required this.credentials}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    final authorizationEndpoint = Uri.parse(credentials['web']['auth_uri']);
+    final tokenEndpoint = Uri.parse(credentials['web']['token_uri']);
+    final identifier = credentials['web']['client_id'];
+    final secret = credentials['web']['client_secret'];
+    final redirectUrl = Uri.parse(credentials['web']['redirect_uris'][0]);
+
     return MaterialApp(
       title: 'Completion Scheduler',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Completion Scheduler'),
+      home: MyHomePage(
+        authorizationEndpoint: authorizationEndpoint,
+        tokenEndpoint: tokenEndpoint,
+        identifier: identifier,
+        secret: secret,
+        redirectUrl: redirectUrl,
+      ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
+  final Uri authorizationEndpoint;
+  final Uri tokenEndpoint;
+  final String identifier;
+  final String secret;
+  final Uri redirectUrl;
+
+  const MyHomePage({
+    Key? key,
+    required this.authorizationEndpoint,
+    required this.tokenEndpoint,
+    required this.identifier,
+    required this.secret,
+    required this.redirectUrl,
+  }) : super(key: key);
+
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
@@ -38,6 +77,9 @@ class _MyHomePageState extends State<MyHomePage> {
   List<String> _items = [];
   final List<TextEditingController> _controllers = [];
   bool _hasChanges = false;
+  GoogleSignInAccount? _currentUser;
+  oauth2.Client? _oauth2Client;
+  static const _scopes = ['https://www.googleapis.com/auth/drive.file'];
 
   @override
   void initState() {
@@ -70,7 +112,8 @@ class _MyHomePageState extends State<MyHomePage> {
     final directory = await getApplicationDocumentsDirectory();
     final file = File('${directory.path}/notes.txt');
     print('Saving notes to ${file.path}');
-    final contents = _controllers.map((controller) => controller.text).join('\n');
+    final contents =
+        _controllers.map((controller) => controller.text).join('\n');
     await file.writeAsString(contents);
     setState(() {
       _hasChanges = false;
@@ -85,11 +128,59 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<void> _login() async {
+    // if (Platform.isLinux) {
+    await _loginWithOAuth2();
+    // } else if (Platform.isAndroid) {
+    //   await _loginWithGoogleSignIn();
+    // }
+  }
+
+  Future<void> _loginWithGoogleSignIn() async {
+    final googleSignIn = GoogleSignIn.standard(scopes: _scopes);
+    final account = await googleSignIn.signIn();
+    setState(() {
+      _currentUser = account;
+    });
+  }
+
+  Future<void> _loginWithOAuth2() async {
+    final grant = oauth2.AuthorizationCodeGrant(
+      widget.identifier,
+      widget.authorizationEndpoint,
+      widget.tokenEndpoint,
+      secret: widget.secret,
+    );
+
+    final authorizationUrl =
+        grant.getAuthorizationUrl(widget.redirectUrl, scopes: _scopes);
+
+    await launch(authorizationUrl.toString());
+
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8080);
+    final request = await server.first;
+    final queryParams = request.uri.queryParameters;
+    final client = await grant.handleAuthorizationResponse(queryParams);
+
+    setState(() {
+      _oauth2Client = client;
+      print('Access token: ${client.credentials.accessToken}');
+    });
+
+    request.response
+      ..statusCode = 200
+      ..headers.set('Content-Type', ContentType.html.mimeType)
+      ..write('<html><h1>Login successful!</h1></html>');
+    await request.response.close();
+    await server.close();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: <LogicalKeySet, Intent>{
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS): const SaveIntent(),
+        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS):
+            const SaveIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -107,17 +198,23 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Scaffold(
             appBar: AppBar(
               backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-              title: Text(widget.title),
+              title: Text('Completion Scheduler'),
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: _addNewItem,
+                  icon: const Icon(Icons.login),
+                  onPressed: _oauth2Client == null ? _login : null,
                 ),
                 IconButton(
                   icon: const Icon(Icons.save),
-                  onPressed: _hasChanges ? () {
-                    _saveNotes();
-                  } : null,
+                  onPressed: _hasChanges
+                      ? () {
+                          _saveNotes();
+                        }
+                      : null,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _addNewItem,
                 ),
               ],
             ),
@@ -146,22 +243,24 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<bool> _onWillPop() async {
     if (_hasChanges) {
       return (await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Unsaved Changes'),
-          content: const Text('You have unsaved changes. Do you really want to quit?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('No'),
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Unsaved Changes'),
+              content: const Text(
+                  'You have unsaved changes. Do you really want to quit?'),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('No'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Yes'),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Yes'),
-            ),
-          ],
-        ),
-      )) ?? false;
+          )) ??
+          false;
     }
     return true;
   }
