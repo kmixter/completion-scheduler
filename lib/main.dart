@@ -6,6 +6,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
 
 class SaveIntent extends Intent {
   const SaveIntent();
@@ -79,6 +80,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _hasChanges = false;
   GoogleSignInAccount? _currentUser;
   oauth2.Client? _oauth2Client;
+  String? _completionRateFolderId;
   static const _scopes = ['https://www.googleapis.com/auth/drive.file'];
 
   @override
@@ -168,11 +170,53 @@ class _MyHomePageState extends State<MyHomePage> {
     });
 
     request.response
-      ..statusCode = 200
+      ..statusCode = HttpStatus.ok
       ..headers.set('Content-Type', ContentType.html.mimeType)
-      ..write('<html><h1>Login successful!</h1></html>');
+      ..write(
+          '<html><h1>Authentication successful! You can close this window.</h1></html>');
     await request.response.close();
     await server.close();
+
+    await _findOrCreateCompletionRateFolder();
+  }
+
+  Future<void> _findOrCreateCompletionRateFolder() async {
+    final headers = {
+      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
+      'Content-Type': 'application/json',
+    };
+
+    // Search for the folder
+    final searchResponse = await http.get(
+      Uri.parse(
+          'https://www.googleapis.com/drive/v3/files?q=name=\'completion-rate\' and mimeType=\'application/vnd.google-apps.folder\''),
+      headers: headers,
+    );
+
+    final searchResult = jsonDecode(searchResponse.body);
+    if (searchResult['files'] != null && searchResult['files'].isNotEmpty) {
+      // Folder exists
+      setState(() {
+        _completionRateFolderId = searchResult['files'].first['id'];
+        print('Found folder ID: $_completionRateFolderId');
+      });
+    } else {
+      // Folder does not exist, create it
+      final createResponse = await http.post(
+        Uri.parse('https://www.googleapis.com/drive/v3/files'),
+        headers: headers,
+        body: jsonEncode({
+          'name': 'completion-rate',
+          'mimeType': 'application/vnd.google-apps.folder',
+        }),
+      );
+
+      final createdFolder = jsonDecode(createResponse.body);
+      setState(() {
+        _completionRateFolderId = createdFolder['id'];
+        print('Created folder ID: $_completionRateFolderId');
+      });
+    }
   }
 
   @override
