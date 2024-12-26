@@ -90,6 +90,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _loadNoteFiles();
+    _pickSelectedFileBasedOnCwd();
   }
 
   Future<void> _loadNoteFiles() async {
@@ -102,11 +103,18 @@ class _MyHomePageState extends State<MyHomePage> {
 
     setState(() {
       _noteFiles = noteFiles;
+      // Re-select the file if it still exists.
+      if (_selectedFile != null) {
+        _selectedFile =
+            _noteFiles.firstWhere((file) => file.path == _selectedFile!.path);
+      }
     });
+  }
 
+  void _pickSelectedFileBasedOnCwd() {
     final currentDir = Directory.current;
     try {
-      File matchingFile = noteFiles.firstWhere(
+      File matchingFile = _noteFiles.firstWhere(
         (file) => currentDir.path.startsWith(path.dirname(file.path)),
       );
       _loadNotes(matchingFile);
@@ -115,12 +123,20 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  Future<void> _loadNotes(File file) async {
+  Future<void> _loadNotes(File? file) async {
+    if (file == null) {
+      setState(() {
+        _selectedFile = null;
+        _items = [];
+        _controllers.clear();
+      });
+      return;
+    }
     print('Loading notes from ${file.path}');
     final contents = await file.readAsString();
     setState(() {
       _selectedFile = file;
-      _items = contents.split('\n');
+      _items = LineSplitter.split(contents).toList();
       _controllers.clear();
       for (var item in _items) {
         _controllers.add(TextEditingController(text: item));
@@ -128,28 +144,44 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<void> _showFailedToSelectDirectoryDialog(
+      String title, String content) async {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveNotes() async {
     if (_selectedFile == null) {
-      final directory = await FilePicker.platform.getDirectoryPath();
-      if (directory == null) return; // User canceled the picker
-      String requiredPath = path.join(Platform.environment['HOME']!, 'prj');
-      if (!directory.startsWith(requiredPath)) {
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Invalid Directory'),
-            content: Text('Please select a directory under $requiredPath.'),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
+      while (true) {
+        final directory = await FilePicker.platform.getDirectoryPath();
+        if (directory == null) return; // User canceled the picker
+        String requiredPath = path.join(Platform.environment['HOME']!, 'prj');
+
+        if (!directory.startsWith(requiredPath) || directory == requiredPath) {
+          await _showFailedToSelectDirectoryDialog('Invalid Directory',
+              'Please select a directory directly under $requiredPath.');
+          continue;
+        }
+        final newFile = File(path.join(directory, 'notes.txt'));
+        if (await newFile.exists()) {
+          await _showFailedToSelectDirectoryDialog('File Already Exists',
+              'A notes.txt file already exists in the selected directory. Please choose a different directory.');
+          continue;
+        }
+        _selectedFile = newFile;
+        break;
       }
-      _selectedFile = File(path.join(directory, 'notes.txt'));
     }
     print('Saving notes to ${_selectedFile!.path}');
     final contents =
@@ -163,8 +195,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _addNewItem() {
     setState(() {
-      _items.add('<Empty line>');
-      _controllers.add(TextEditingController(text: _items.last));
+      _items.add('');
+      _controllers.add(TextEditingController());
       _hasChanges = true;
     });
   }
@@ -306,25 +338,31 @@ class _MyHomePageState extends State<MyHomePage> {
                 DropdownButton<File>(
                   value: _selectedFile,
                   hint: const Text('Select a notes file'),
-                  items: _noteFiles.map((file) {
-                    return DropdownMenuItem<File>(
-                      value: file,
-                      child: Text(path.basename(path.dirname(file.path))),
-                    );
-                  }).toList(),
+                  items: [
+                    ..._noteFiles.map((file) {
+                      return DropdownMenuItem<File>(
+                        value: file,
+                        child: Text(path.basename(path.dirname(file.path))),
+                      );
+                    }).toList(),
+                    const DropdownMenuItem<File>(
+                      value: null,
+                      child: Text('<create a new file>'),
+                    ),
+                  ],
                   onChanged: (file) {
-                    if (file != null) {
-                      _loadNotes(file);
-                    }
+                    _loadNotes(file);
                   },
                 ),
                 Expanded(
                   child: ListView.builder(
                     itemCount: _items.length,
                     itemBuilder: (context, index) {
-                      return ListTile(
-                        title: TextField(
+                      return Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: TextField(
                           controller: _controllers[index],
+                          decoration: InputDecoration(hintText: 'Enter task'),
                           onChanged: (newValue) {
                             setState(() {
                               _items[index] = newValue;
