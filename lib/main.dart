@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:oauth2/oauth2.dart' as oauth2;
-import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:oauth2/oauth2.dart' as oauth2;
+import 'package:path/path.dart' as path;
+import 'package:url_launcher/url_launcher.dart';
 
 class SaveIntent extends Intent {
   const SaveIntent();
@@ -82,41 +83,61 @@ class _MyHomePageState extends State<MyHomePage> {
   oauth2.Client? _oauth2Client;
   String? _completionRateFolderId;
   static const _scopes = ['https://www.googleapis.com/auth/drive.file'];
+  List<File> _noteFiles = [];
+  File? _selectedFile;
 
   @override
   void initState() {
     super.initState();
-    _loadNotes();
+    _loadNoteFiles();
   }
 
-  Future<void> _loadNotes() async {
-    final directory = await getApplicationDocumentsDirectory();
-    print('Loading notes from ${directory.path}');
-    final file = File('${directory.path}/notes.txt');
-    if (await file.exists()) {
-      final contents = await file.readAsString();
-      setState(() {
-        _items = contents.split('\n');
-        _controllers.clear();
-        for (var item in _items) {
-          _controllers.add(TextEditingController(text: item));
-        }
-      });
-    } else {
-      setState(() {
-        _items = [];
-        _controllers.clear();
-      });
+  Future<void> _loadNoteFiles() async {
+    final homeDir = Directory(path.join(Platform.environment['HOME']!, 'prj'));
+    final directories = homeDir.listSync().whereType<Directory>();
+    final noteFiles = directories
+        .map((dir) => File(path.join(dir.path, 'notes.txt')))
+        .where((file) => file.existsSync())
+        .toList();
+
+    setState(() {
+      _noteFiles = noteFiles;
+    });
+
+    final currentDir = Directory.current;
+    try {
+      File matchingFile = noteFiles.firstWhere(
+        (file) => currentDir.path.startsWith(path.dirname(file.path)),
+      );
+      _loadNotes(matchingFile);
+    } on StateError catch (e) {
+      // No matching file found.
     }
   }
 
+  Future<void> _loadNotes(File file) async {
+    print('Loading notes from ${file.path}');
+    final contents = await file.readAsString();
+    setState(() {
+      _selectedFile = file;
+      _items = contents.split('\n');
+      _controllers.clear();
+      for (var item in _items) {
+        _controllers.add(TextEditingController(text: item));
+      }
+    });
+  }
+
   Future<void> _saveNotes() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/notes.txt');
-    print('Saving notes to ${file.path}');
+    if (_selectedFile == null) {
+      final directory = await FilePicker.platform.getDirectoryPath();
+      if (directory == null) return; // User canceled the picker
+      _selectedFile = File(path.join(directory, 'notes.txt'));
+    }
+    print('Saving notes to ${_selectedFile!.path}');
     final contents =
         _controllers.map((controller) => controller.text).join('\n');
-    await file.writeAsString(contents);
+    await _selectedFile!.writeAsString(contents);
     setState(() {
       _hasChanges = false;
     });
@@ -131,11 +152,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _login() async {
-    // if (Platform.isLinux) {
-    await _loginWithOAuth2();
-    // } else if (Platform.isAndroid) {
-    //   await _loginWithGoogleSignIn();
-    // }
+    if (Platform.isLinux) {
+      await _loginWithOAuth2();
+    } else if (Platform.isAndroid) {
+      await _loginWithGoogleSignIn();
+    }
   }
 
   Future<void> _loginWithGoogleSignIn() async {
@@ -262,21 +283,42 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ],
             ),
-            body: ListView.builder(
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: TextField(
-                    controller: _controllers[index],
-                    onChanged: (newValue) {
-                      setState(() {
-                        _items[index] = newValue;
-                        _hasChanges = true;
-                      });
+            body: Column(
+              children: [
+                DropdownButton<File>(
+                  value: _selectedFile,
+                  hint: const Text('Select a notes file'),
+                  items: _noteFiles.map((file) {
+                    return DropdownMenuItem<File>(
+                      value: file,
+                      child: Text(path.basename(path.dirname(file.path))),
+                    );
+                  }).toList(),
+                  onChanged: (file) {
+                    if (file != null) {
+                      _loadNotes(file);
+                    }
+                  },
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _items.length,
+                    itemBuilder: (context, index) {
+                      return ListTile(
+                        title: TextField(
+                          controller: _controllers[index],
+                          onChanged: (newValue) {
+                            setState(() {
+                              _items[index] = newValue;
+                              _hasChanges = true;
+                            });
+                          },
+                        ),
+                      );
                     },
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
         ),
