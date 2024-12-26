@@ -132,15 +132,33 @@ class _MyHomePageState extends State<MyHomePage> {
     if (_selectedFile == null) {
       final directory = await FilePicker.platform.getDirectoryPath();
       if (directory == null) return; // User canceled the picker
+      String requiredPath = path.join(Platform.environment['HOME']!, 'prj');
+      if (!directory.startsWith(requiredPath)) {
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Invalid Directory'),
+            content: Text('Please select a directory under $requiredPath.'),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
       _selectedFile = File(path.join(directory, 'notes.txt'));
     }
     print('Saving notes to ${_selectedFile!.path}');
     final contents =
-        _controllers.map((controller) => controller.text).join('\n');
+        _controllers.map((controller) => '${controller.text}\n').join('');
     await _selectedFile!.writeAsString(contents);
     setState(() {
       _hasChanges = false;
     });
+    _loadNoteFiles(); // Reload the dropdown with available files
   }
 
   void _addNewItem() {
