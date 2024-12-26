@@ -195,7 +195,7 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
 
-    final fileName = '${path.basename(path.dirname(_selectedFile!.path))}.txt';
+    final fileName = '${_getNotesDescriptor(_selectedFile!.path)}.txt';
     final headers = {
       'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
       'Content-Type': 'application/json',
@@ -221,7 +221,12 @@ class _MyHomePageState extends State<MyHomePage> {
         },
         body: contents,
       );
-      print('Updated file ID: $fileId');
+
+      if (updateResponse.statusCode != 200) {
+        print('Failed to update file: ${updateResponse.body}');
+      } else {
+        print('Updated file ID: $fileId');
+      }
     } else {
       // File does not exist, create it
       final createResponse = await http.post(
@@ -247,8 +252,13 @@ $contents
 --foo_bar_baz--
 ''',
       );
-      final createdFile = jsonDecode(createResponse.body);
-      print('Created file ID: ${createdFile['id']}');
+
+      if (createResponse.statusCode != 200) {
+        print('Failed to create file: ${createResponse.body}');
+      } else {
+        final createdFile = jsonDecode(createResponse.body);
+        print('Created file ID: ${createdFile['id']}');
+      }
     }
   }
 
@@ -308,10 +318,11 @@ $contents
     await request.response.close();
     await server.close();
 
-    await _findOrCreateCompletionRateFolder();
+    await _findOrCreateCompletionRateFolderWithOAuth2();
+    await _reconcileWithOAuth2();
   }
 
-  Future<void> _findOrCreateCompletionRateFolder() async {
+  Future<void> _findOrCreateCompletionRateFolderWithOAuth2() async {
     final headers = {
       'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
       'Content-Type': 'application/json',
@@ -348,6 +359,103 @@ $contents
         print('Created folder ID: $_completionRateFolderId');
       });
     }
+  }
+
+  Future<void> _reconcileWithOAuth2() async {
+    if (_completionRateFolderId == null) {
+      print('Completion rate folder ID is null. Cannot reconcile.');
+      return;
+    }
+
+    final headers = {
+      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
+      'Content-Type': 'application/json',
+    };
+
+    // List all files in the completion-rate folder
+    final listResponse = await http.get(
+      Uri.parse(
+          'https://www.googleapis.com/drive/v3/files?q=\'$_completionRateFolderId\' in parents'),
+      headers: headers,
+    );
+
+    final listResult = jsonDecode(listResponse.body);
+    if (listResult['files'] == null || listResult['files'].isEmpty) {
+      print('No files found in the completion-rate folder.');
+      return;
+    }
+
+    for (var file in listResult['files']) {
+      final driveFileName = file['name'];
+      print('Considering Drive file: $driveFileName');
+      print('All Drive metadata is: $file');
+      final localFilePath = _getNotesPathFromDriveFileName(driveFileName);
+      print('Equivalent local path: $localFilePath');
+      final localFile = File(localFilePath);
+
+      final driveFileResponse = await http.get(
+        Uri.parse(
+            'https://www.googleapis.com/drive/v3/files/${file['id']}?alt=media'),
+        headers: headers,
+      );
+
+      final driveFileContents = driveFileResponse.body;
+      final driveFileMetadataResponse = await http.get(
+        Uri.parse(
+            'https://www.googleapis.com/drive/v3/files/${file['id']}?fields=modifiedTime'),
+        headers: headers,
+      );
+      final driveFileMetadata = jsonDecode(driveFileMetadataResponse.body);
+      final driveFileModifiedTime =
+          DateTime.parse(driveFileMetadata['modifiedTime']);
+
+      if (await localFile.exists()) {
+        final localFileModifiedTime = await localFile.lastModified();
+        print(
+            'Comparing local ($localFileModifiedTime) vs drive ($driveFileModifiedTime)');
+        if (driveFileModifiedTime.isAfter(localFileModifiedTime)) {
+          // Drive file is newer, update local file
+          print('Synchronizing local file to drive');
+          await localFile.writeAsString(driveFileContents);
+
+          if (_selectedFile != null && _selectedFile!.path == localFilePath) {
+            // Reload notes if the selected file was updated.
+            await _loadNoteFiles();
+          }
+        } else {
+          print('Local file is newer than drive, letting using manually save');
+        }
+      } else {
+        // Local file does not exist, create it
+        await _createParentDirectories(localFilePath);
+        await localFile.writeAsString(driveFileContents);
+        print('Created local file: $localFilePath');
+      }
+    }
+  }
+
+  Future<void> _createParentDirectories(String filePath) async {
+    final directory = Directory(path.dirname(filePath));
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+  }
+
+  String _getNotesDescriptor(String filepath) {
+    return path.basename(path.dirname(filepath));
+  }
+
+  String _getNotesPath(String descriptor) {
+    return path.join(
+        Platform.environment['HOME']!, 'prj', descriptor, 'notes.txt');
+  }
+
+  String _getNotesPathFromDriveFileName(String driveFileName) {
+    // strip off the '.txt' extension if it has one otherwise use the full name
+    final descriptor = driveFileName.endsWith('.txt')
+        ? driveFileName.substring(0, driveFileName.length - 4)
+        : driveFileName;
+    return _getNotesPath(descriptor);
   }
 
   @override
@@ -396,7 +504,7 @@ $contents
                     ..._noteFiles.map((file) {
                       return DropdownMenuItem<File>(
                         value: file,
-                        child: Text(path.basename(path.dirname(file.path))),
+                        child: Text(_getNotesDescriptor(file.path)),
                       );
                     }).toList(),
                     const DropdownMenuItem<File>(
