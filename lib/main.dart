@@ -2,16 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:path/path.dart' as path;
 import 'package:url_launcher/url_launcher.dart';
-
-class SaveIntent extends Intent {
-  const SaveIntent();
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -293,21 +288,15 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: <LogicalKeySet, Intent>{
-        LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyS):
-            const SaveIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          SaveIntent: CallbackAction<SaveIntent>(
-            onInvoke: (SaveIntent intent) {
-              if (_hasChanges) {
-                _saveNotes();
-              }
-              return null;
-            },
-          ),
+    return FocusScope(
+      child: RawKeyboardListener(
+        focusNode: FocusNode(),
+        onKey: (event) {
+          if (event.isControlPressed && event.logicalKey.keyLabel == 'S') {
+            if (_hasChanges) {
+              _saveNotes();
+            }
+          }
         },
         child: WillPopScope(
           onWillPop: _onWillPop,
