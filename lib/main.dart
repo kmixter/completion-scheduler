@@ -118,7 +118,7 @@ class _MyHomePageState extends State<MyHomePage> {
         (file) => currentDir.path.startsWith(path.dirname(file.path)),
       );
       _loadNotes(matchingFile);
-    } on StateError catch (e) {
+    } on StateError {
       // No matching file found.
     }
   }
@@ -214,6 +214,7 @@ class _MyHomePageState extends State<MyHomePage> {
     final account = await googleSignIn.signIn();
     setState(() {
       _currentUser = account;
+      print('currentUser=$_currentUser');
     });
   }
 

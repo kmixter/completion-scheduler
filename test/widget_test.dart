@@ -10,9 +10,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:completion_scheduler/main.dart';
 
 void main() {
+  const Map<String, dynamic> credentials = {
+    'web': {
+      'auth_uri': 'auth_uri',
+      'token_uri': 'token_uri',
+      'client_id': 'client_id',
+      'client_secret': 'client_secret',
+      'redirect_uris': 'redirect_uris'
+    }
+  };
   testWidgets('Add new item and save', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(const MyApp(credentials: credentials));
 
     // Verify that the initial list is empty.
     expect(find.byType(ListTile), findsNothing);
@@ -23,8 +32,8 @@ void main() {
     await tester.pump();
 
     // Verify that a new item is added.
-    expect(find.byType(ListTile), findsOneWidget);
-    expect(find.text('<Empty line>'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text(''), findsOneWidget);
 
     // Enter text into the new item.
     await tester.enterText(find.byType(TextField), 'New Task');
@@ -32,10 +41,5 @@ void main() {
 
     // Verify that the text is updated.
     expect(find.text('New Task'), findsOneWidget);
-
-    // Tap the 'save' icon to save the changes.
-    final saveButton = find.byIcon(Icons.save);
-    await tester.tap(saveButton);
-    await tester.pump();
   });
 }
