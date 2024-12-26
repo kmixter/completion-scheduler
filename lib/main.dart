@@ -182,10 +182,74 @@ class _MyHomePageState extends State<MyHomePage> {
     final contents =
         _controllers.map((controller) => '${controller.text}\n').join('');
     await _selectedFile!.writeAsString(contents);
+    await _saveNotesToDrive(contents); // Save notes to Google Drive
     setState(() {
       _hasChanges = false;
     });
     _loadNoteFiles(); // Reload the dropdown with available files
+  }
+
+  Future<void> _saveNotesToDrive(String contents) async {
+    if (_completionRateFolderId == null) {
+      print('Not logged in. Cannot save to Drive.');
+      return;
+    }
+
+    final fileName = '${path.basename(path.dirname(_selectedFile!.path))}.txt';
+    final headers = {
+      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
+      'Content-Type': 'application/json',
+    };
+
+    // Check if the file already exists in the folder
+    final searchResponse = await http.get(
+      Uri.parse(
+          'https://www.googleapis.com/drive/v3/files?q=name=\'$fileName\' and \'$_completionRateFolderId\' in parents'),
+      headers: headers,
+    );
+
+    final searchResult = jsonDecode(searchResponse.body);
+    if (searchResult['files'] != null && searchResult['files'].isNotEmpty) {
+      // File exists, update it
+      final fileId = searchResult['files'].first['id'];
+      final updateResponse = await http.patch(
+        Uri.parse(
+            'https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media'),
+        headers: {
+          'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
+          'Content-Type': 'text/plain',
+        },
+        body: contents,
+      );
+      print('Updated file ID: $fileId');
+    } else {
+      // File does not exist, create it
+      final createResponse = await http.post(
+        Uri.parse(
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart'),
+        headers: {
+          'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
+          'Content-Type': 'multipart/related; boundary=foo_bar_baz',
+        },
+        body: '''
+--foo_bar_baz
+Content-Type: application/json; charset=UTF-8
+
+{
+  "name": "$fileName",
+  "parents": ["$_completionRateFolderId"]
+}
+
+--foo_bar_baz
+Content-Type: text/plain
+
+$contents
+--foo_bar_baz--
+''',
+      );
+      final createdFile = jsonDecode(createResponse.body);
+      print('Created file ID: ${createdFile['id']}');
+    }
   }
 
   void _addNewItem() {
