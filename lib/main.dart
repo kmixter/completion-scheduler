@@ -23,8 +23,6 @@ Future<Map<String, dynamic>> loadCredentials() async {
   return jsonDecode(contents);
 }
 
-const String defaultDateFormat = 'EEE, MMM d, yyyy';
-
 class MyApp extends StatelessWidget {
   final Map<String, dynamic> credentials;
 
@@ -79,6 +77,7 @@ class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
   List<String> _items = [];
   final List<TextEditingController> _controllers = [];
+  final List<FocusNode> _focusNodes = [];
   bool _hasChanges = false;
   GoogleSignInAccount? _currentUser;
   oauth2.Client? _oauth2Client;
@@ -152,11 +151,7 @@ class _MyHomePageState extends State<MyHomePage>
 
     final currentDate = DateTime.now();
     if (notesFile.regions.isEmpty) {
-      notesFile.regions.add(NotesRegion(
-        dateLine: DateFormat(defaultDateFormat).format(currentDate),
-        separatorLine: '-' * 10,
-        startLine: 0,
-      ));
+      notesFile.createRegion(currentDate);
     }
 
     setState(() {
@@ -175,11 +170,41 @@ class _MyHomePageState extends State<MyHomePage>
     setState(() {
       _items = tasks.map((task) => task.toLine()).toList();
       _controllers.clear();
+      _focusNodes.clear();
       for (var item in _items) {
-        _controllers.add(TextEditingController(text: item));
+        _setTaskControllerAndFocusNode(null, item);
       }
       _notesController.text = notes;
     });
+  }
+
+  void _setTaskControllerAndFocusNode(int? index, String text) {
+    final controller = TextEditingController(text: text);
+    final focusNode = FocusNode();
+    focusNode.addListener(() {
+      if (focusNode.hasFocus) return;
+      final text = controller.text.trim();
+      Task? task;
+      try {
+        task = Task.fromLine(text);
+      } catch (e) {
+        task = Task(dayNumber: -1, desc: text);
+        _items[_controllers.indexOf(controller)] = task.toLine();
+        controller.text = task.toLine();
+        controller.selection = TextSelection.fromPosition(
+            TextPosition(offset: controller.text.length));
+        setState(() {
+          _hasChanges = true;
+        });
+      }
+    });
+    if (index != null) {
+      _controllers[index] = controller;
+      _focusNodes[index] = focusNode;
+    } else {
+      _controllers.add(controller);
+      _focusNodes.add(focusNode);
+    }
   }
 
   Future<void> _showFailedToSelectDirectoryDialog(
@@ -312,7 +337,7 @@ $contents
   void _addNewItem() {
     setState(() {
       _items.add('');
-      _controllers.add(TextEditingController());
+      _setTaskControllerAndFocusNode(null, '');
       _hasChanges = true;
     });
   }
@@ -640,6 +665,7 @@ $contents
                             padding: const EdgeInsets.all(8.0),
                             child: TextField(
                               controller: _controllers[index],
+                              focusNode: _focusNodes[index],
                               decoration:
                                   InputDecoration(hintText: 'Enter task'),
                               onChanged: (newValue) {

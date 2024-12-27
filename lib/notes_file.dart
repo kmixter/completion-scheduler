@@ -1,6 +1,10 @@
 import 'task.dart';
 import 'package:intl/intl.dart';
 
+const String defaultDateFormat = 'EEE, MMM d, yyyy';
+
+enum ParseState { beginRegion, readingTodos, readingNotes }
+
 class NotesFile {
   final List<NotesRegion> regions = [];
 
@@ -11,6 +15,9 @@ class NotesFile {
     }
     NotesRegion? currentRegion;
     regions.clear();
+
+    ParseState state = ParseState.beginRegion;
+
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
 
@@ -22,61 +29,101 @@ class NotesFile {
           regions.add(currentRegion);
         }
         currentRegion = NotesRegion(
-            dateLine: line, separatorLine: lines[i + 1], startLine: i);
+          date: _parseDate(line)!,
+          separatorLine: lines[i + 1],
+        );
         ++i; // Skip the separator line.
-      }
-
-      if (currentRegion == null) {
+        state = ParseState.beginRegion;
         continue;
       }
 
-      if (_isTodoLine(line) && currentRegion.todoStartLine == null) {
-        currentRegion.todoLine = line;
-        currentRegion.todoStartLine = i + 1;
-        continue;
-      }
+      switch (state) {
+        case ParseState.beginRegion:
+          if (_isTodoLine(line)) {
+            currentRegion?.todoLine = line;
+            state = ParseState.readingTodos;
+          } else if (line.trim().isNotEmpty) {
+            state = ParseState.readingNotes;
+            i--; // Reprocess this line in the next state.
+          }
+          break;
 
-      if (currentRegion.todoStartLine != null &&
-          currentRegion.todoEndLine == null) {
-        // Handle TODOs region.
-        if (Task.isTodoLine(line)) {
-          currentRegion.tasks.add(Task.fromLine(line));
-        } else {
-          currentRegion.todoEndLine = i;
-        }
-      }
+        case ParseState.readingTodos:
+          if (Task.isTodoLine(line)) {
+            currentRegion?.tasks.add(Task.fromLine(line));
+          } else {
+            state = ParseState.readingNotes;
+            i--; // Reprocess this line in the next state.
+          }
+          break;
 
-      if (currentRegion.todoEndLine != null) {
-        currentRegion.notes.add(line.trim());
+        case ParseState.readingNotes:
+          final trimmed = line.trim();
+          if (trimmed.isEmpty && currentRegion?.notes.isEmpty == true) {
+            // Skip empty lines between tasks and notes.
+            continue;
+          }
+          currentRegion?.notes.add(line.trim());
+          break;
       }
     }
 
     if (currentRegion != null) {
       regions.add(currentRegion);
     }
+
+    // Remove trailing empty note lines from all regions
+    for (var region in regions) {
+      while (region.notes.isNotEmpty && region.notes.last.isEmpty) {
+        region.notes.removeLast();
+      }
+    }
   }
 
   List<DateTime> getDates() {
-    return regions.map((region) => _parseDate(region.dateLine)!).toList();
+    return regions.map((region) => region.date).toList();
   }
 
   NotesRegion getRegion(DateTime date) {
-    return regions.firstWhere((region) => _parseDate(region.dateLine) == date);
+    return regions.firstWhere((region) => region.date == date);
+  }
+
+  NotesRegion createRegion(DateTime date) {
+    final separatorLine = '-' * 10;
+    final region = NotesRegion(
+      date: date,
+      separatorLine: separatorLine,
+    );
+    regions.add(region);
+    return region;
+  }
+
+  StringBuffer _toStringBuffer() {
+    final buffer = StringBuffer();
+    for (var region in regions) {
+      buffer.writeln(DateFormat(defaultDateFormat).format(region.date));
+      buffer.writeln(region.separatorLine);
+      if (region.tasks.isNotEmpty) {
+        buffer.writeln(region.todoLine ?? 'TODOs:');
+        for (var task in region.tasks) {
+          buffer.writeln(task.toLine());
+        }
+        buffer.writeln();
+      }
+      if (region.notes.isNotEmpty) {
+        buffer.writeln(region.notes.join('\n'));
+        buffer.writeln();
+      }
+      if (region.tasks.isEmpty && region.notes.isEmpty) {
+        buffer.writeln();
+      }
+    }
+    return buffer;
   }
 
   @override
   String toString() {
-    final buffer = StringBuffer();
-    for (var region in regions) {
-      buffer.writeln(region.dateLine);
-      buffer.writeln(region.separatorLine);
-      buffer.writeln(region.todoLine);
-      for (var task in region.tasks) {
-        buffer.writeln(task.toLine());
-      }
-      buffer.writeln(region.notes.join('\n'));
-    }
-    return buffer.toString();
+    return _toStringBuffer().toString();
   }
 
   bool _isDateLine(String line) {
@@ -110,19 +157,15 @@ class NotesFile {
 }
 
 class NotesRegion {
-  final String dateLine;
+  final DateTime date;
   final String separatorLine;
-  final int startLine;
   String? todoLine;
-  int? todoStartLine;
-  int? todoEndLine;
   List<Task> tasks = [];
   List<String> notes = [];
 
   NotesRegion({
-    required this.dateLine,
+    required this.date,
     required this.separatorLine,
-    required this.startLine,
   });
 
   void setNotesFromString(String notesString) {
