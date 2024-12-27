@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:oauth2/oauth2.dart' as oauth2;
 import 'package:path/path.dart' as path;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
+import 'notes_file.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +21,8 @@ Future<Map<String, dynamic>> loadCredentials() async {
   final contents = await file.readAsString();
   return jsonDecode(contents);
 }
+
+const String defaultDateFormat = 'EEE, MMM d, yyyy';
 
 class MyApp extends StatelessWidget {
   final Map<String, dynamic> credentials;
@@ -70,7 +74,8 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+    with SingleTickerProviderStateMixin {
   List<String> _items = [];
   final List<TextEditingController> _controllers = [];
   bool _hasChanges = false;
@@ -80,10 +85,14 @@ class _MyHomePageState extends State<MyHomePage> {
   static const _scopes = ['https://www.googleapis.com/auth/drive.file'];
   List<File> _noteFiles = [];
   File? _selectedFile;
+  late TabController _tabController;
+  NotesFile? _notesFile;
+  DateTime? _selectedDate;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadNoteFiles();
     _pickSelectedFileBasedOnCwd();
   }
@@ -124,14 +133,37 @@ class _MyHomePageState extends State<MyHomePage> {
         _selectedFile = null;
         _items = [];
         _controllers.clear();
+        _notesFile = null;
+        _selectedDate = null;
       });
       return;
     }
     print('Loading notes from ${file.path}');
-    final contents = await file.readAsString();
+    final notesFile = NotesFile(file);
+    await notesFile.parse();
+
+    final currentDate = DateTime.now();
+    if (notesFile.regions.isEmpty) {
+      notesFile.regions.add(NotesRegion(
+        dateLine: DateFormat(defaultDateFormat).format(currentDate),
+        separatorLine: '-' * 10,
+        startLine: 0,
+      ));
+    }
+
     setState(() {
       _selectedFile = file;
-      _items = LineSplitter.split(contents).toList();
+      _notesFile = notesFile;
+      _selectedDate = notesFile.getDates().last;
+      _populateTasksForSelectedDate();
+    });
+  }
+
+  void _populateTasksForSelectedDate() {
+    if (_notesFile == null || _selectedDate == null) return;
+    final tasks = _notesFile!.getTasksForDate(_selectedDate!);
+    setState(() {
+      _items = tasks.map((task) => task.desc).toList();
       _controllers.clear();
       for (var item in _items) {
         _controllers.add(TextEditingController(text: item));
@@ -495,47 +527,115 @@ $contents
                 ),
               ],
             ),
-            body: Column(
-              children: [
-                DropdownButton<File>(
-                  value: _selectedFile,
-                  hint: const Text('Select a notes file'),
-                  items: [
-                    ..._noteFiles.map((file) {
-                      return DropdownMenuItem<File>(
-                        value: file,
-                        child: Text(_getNotesDescriptor(file.path)),
-                      );
-                    }).toList(),
-                    const DropdownMenuItem<File>(
-                      value: null,
-                      child: Text('<create a new file>'),
+            drawer: Drawer(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  DrawerHeader(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
                     ),
-                  ],
-                  onChanged: (file) {
-                    _loadNotes(file);
-                  },
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _items.length,
-                    itemBuilder: (context, index) {
-                      return Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: TextField(
-                          controller: _controllers[index],
-                          decoration: InputDecoration(hintText: 'Enter task'),
-                          onChanged: (newValue) {
-                            setState(() {
-                              _items[index] = newValue;
-                              _hasChanges = true;
-                            });
+                    child: Text(
+                      'Completion Scheduler',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    title: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Select a notes file'),
+                        DropdownButton<File>(
+                          value: _selectedFile,
+                          hint: const Text('Select a notes file'),
+                          items: [
+                            ..._noteFiles.map((file) {
+                              return DropdownMenuItem<File>(
+                                value: file,
+                                child: Text(_getNotesDescriptor(file.path)),
+                              );
+                            }).toList(),
+                            const DropdownMenuItem<File>(
+                              value: null,
+                              child: Text('<create a new file>'),
+                            ),
+                          ],
+                          onChanged: (file) {
+                            _loadNotes(file);
                           },
                         ),
-                      );
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            body: Column(
+              children: [
+                Center(
+                  child: DropdownButton<DateTime>(
+                    value: _selectedDate,
+                    hint: const Text('Choose region'),
+                    items: [
+                      ...?_notesFile?.getDates().map((date) {
+                        return DropdownMenuItem<DateTime>(
+                          value: date,
+                          child:
+                              Text(DateFormat(defaultDateFormat).format(date)),
+                        );
+                      }).toList(),
+                      DropdownMenuItem<DateTime>(
+                        value: DateTime.now(),
+                        child: const Text('<create new region>'),
+                      ),
+                    ],
+                    onChanged: (date) {
+                      setState(() {
+                        _selectedDate = date;
+                        _populateTasksForSelectedDate();
+                      });
                     },
                   ),
                 ),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      ListView.builder(
+                        itemCount: _items.length,
+                        itemBuilder: (context, index) {
+                          return Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: TextField(
+                              controller: _controllers[index],
+                              decoration:
+                                  InputDecoration(hintText: 'Enter task'),
+                              onChanged: (newValue) {
+                                setState(() {
+                                  _items[index] = newValue;
+                                  _hasChanges = true;
+                                });
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                      Center(
+                        child: Text('Notes section'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            bottomNavigationBar: TabBar(
+              controller: _tabController,
+              tabs: [
+                Tab(icon: Icon(Icons.list), text: 'Tasks'),
+                Tab(icon: Icon(Icons.note), text: 'Notes'),
               ],
             ),
           ),
@@ -571,6 +671,7 @@ $contents
 
   @override
   void dispose() {
+    _tabController.dispose();
     for (var controller in _controllers) {
       controller.dispose();
     }
