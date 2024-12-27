@@ -572,6 +572,7 @@ $contents
                     return ListTile(
                       title: Text(DateFormat(defaultDateFormat).format(date)),
                       selected: _selectedDate == date,
+                      selectedTileColor: Colors.yellow,
                       onTap: () {
                         setState(() {
                           _selectedDate = date;
@@ -584,6 +585,7 @@ $contents
                   ListTile(
                     title: const Text('<create new region>'),
                     selected: _selectedDate == DateTime.now(),
+                    selectedTileColor: Colors.yellow,
                     onTap: () {
                       setState(() {
                         _selectedDate = DateTime.now();
@@ -600,6 +602,7 @@ $contents
                     return ListTile(
                       title: Text(_getNotesDescriptor(file.path)),
                       selected: _selectedFile == file,
+                      selectedTileColor: Colors.yellow,
                       onTap: () {
                         setState(() {
                           _selectedFile = file;
@@ -612,6 +615,7 @@ $contents
                   ListTile(
                     title: const Text('<create a new file>'),
                     selected: _selectedFile == null,
+                    selectedTileColor: Colors.yellow,
                     onTap: () {
                       setState(() {
                         _selectedFile = null;
