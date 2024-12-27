@@ -97,7 +97,7 @@ Notes for 12/10.
       emptyFile.createRegion(DateTime(2023, 10, 2));
       final newContent = emptyFile.toString();
       expect(newContent,
-          'Sun, Oct 1, 2023\n----------\n\nMon, Oct 2, 2023\n----------\n\n');
+          'Sun, Oct 1, 2023\n----------------\n\nMon, Oct 2, 2023\n----------------\n\n');
     });
 
     test('test reading file with 2 empty regions', () async {
@@ -117,7 +117,7 @@ Notes for 12/10.
       region.setNotesFromString('hi there, this is a note');
       final newContent = justNotes.toString();
       expect(newContent,
-          'Sun, Oct 1, 2023\n----------\nhi there, this is a note\n\n');
+          'Sun, Oct 1, 2023\n----------------\nhi there, this is a note\n\n');
     });
 
     test('test reading empty tasks', () async {
@@ -135,8 +135,8 @@ Notes for 12/10.
       final region = justNotes.createRegion(DateTime(2023, 10, 1));
       region.tasks.add(Task(dayNumber: 0, desc: 'First Task'));
       final newContent = justNotes.toString();
-      expect(
-          newContent, 'Sun, Oct 1, 2023\n----------\nTODOs:\nM First Task\n\n');
+      expect(newContent,
+          'Sun, Oct 1, 2023\n----------------\nTODOs:\nM First Task\n\n');
     });
   });
 }

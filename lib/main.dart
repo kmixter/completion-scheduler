@@ -75,7 +75,6 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
-  List<String> _items = [];
   final List<TextEditingController> _controllers = [];
   final List<FocusNode> _focusNodes = [];
   bool _hasChanges = false;
@@ -137,7 +136,6 @@ class _MyHomePageState extends State<MyHomePage>
     if (file == null) {
       setState(() {
         _selectedFile = null;
-        _items = [];
         _controllers.clear();
         _notesFile = null;
         _selectedDate = null;
@@ -168,11 +166,10 @@ class _MyHomePageState extends State<MyHomePage>
     final tasks = region.tasks;
     final notes = region.getNotesString();
     setState(() {
-      _items = tasks.map((task) => task.toLine()).toList();
       _controllers.clear();
       _focusNodes.clear();
-      for (var item in _items) {
-        _setTaskControllerAndFocusNode(null, item);
+      for (var task in tasks) {
+        _setTaskControllerAndFocusNode(null, task.toLine());
       }
       _notesController.text = notes;
     });
@@ -189,7 +186,6 @@ class _MyHomePageState extends State<MyHomePage>
         task = Task.fromLine(text);
       } catch (e) {
         task = Task(dayNumber: -1, desc: text);
-        _items[_controllers.indexOf(controller)] = task.toLine();
         controller.text = task.toLine();
         controller.selection = TextSelection.fromPosition(
             TextPosition(offset: controller.text.length));
@@ -336,7 +332,6 @@ $contents
 
   void _addNewItem() {
     setState(() {
-      _items.add('');
       _setTaskControllerAndFocusNode(null, '');
       _hasChanges = true;
     });
@@ -659,7 +654,7 @@ $contents
                     controller: _tabController,
                     children: [
                       ListView.builder(
-                        itemCount: _items.length,
+                        itemCount: _controllers.length,
                         itemBuilder: (context, index) {
                           return Padding(
                             padding: const EdgeInsets.all(8.0),
@@ -670,7 +665,6 @@ $contents
                                   InputDecoration(hintText: 'Enter task'),
                               onChanged: (newValue) {
                                 setState(() {
-                                  _items[index] = newValue;
                                   _hasChanges = true;
                                 });
                               },

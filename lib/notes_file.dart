@@ -28,10 +28,7 @@ class NotesFile {
         if (currentRegion != null) {
           regions.add(currentRegion);
         }
-        currentRegion = NotesRegion(
-          date: _parseDate(line)!,
-          separatorLine: lines[i + 1],
-        );
+        currentRegion = NotesRegion(date: _parseDate(line)!);
         ++i; // Skip the separator line.
         state = ParseState.beginRegion;
         continue;
@@ -89,11 +86,7 @@ class NotesFile {
   }
 
   NotesRegion createRegion(DateTime date) {
-    final separatorLine = '-' * 10;
-    final region = NotesRegion(
-      date: date,
-      separatorLine: separatorLine,
-    );
+    final region = NotesRegion(date: date);
     regions.add(region);
     return region;
   }
@@ -101,8 +94,9 @@ class NotesFile {
   StringBuffer _toStringBuffer() {
     final buffer = StringBuffer();
     for (var region in regions) {
-      buffer.writeln(DateFormat(defaultDateFormat).format(region.date));
-      buffer.writeln(region.separatorLine);
+      final dateLine = DateFormat(defaultDateFormat).format(region.date);
+      buffer.writeln(dateLine);
+      buffer.writeln('-' * dateLine.length);
       if (region.tasks.isNotEmpty) {
         buffer.writeln(region.todoLine ?? 'TODOs:');
         for (var task in region.tasks) {
@@ -158,14 +152,12 @@ class NotesFile {
 
 class NotesRegion {
   final DateTime date;
-  final String separatorLine;
   String? todoLine;
   List<Task> tasks = [];
   List<String> notes = [];
 
   NotesRegion({
     required this.date,
-    required this.separatorLine,
   });
 
   void setNotesFromString(String notesString) {
