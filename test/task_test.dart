@@ -40,7 +40,8 @@ void main() {
     });
 
     test('parse() and toLine() - TODO with all annotations', () {
-      const line = '* This is a TODO with all bells and whistles 76m +2.00hr <=12/31 ## @8:56 10m/d';
+      const line =
+          '* This is a TODO with all bells and whistles 76m +2hr <=12/31 ## @8:56 10m/d';
       final fixedDate = DateTime(2024, 12, 24);
       final task = Task.fromLine(line, now: fixedDate);
       expect(task.dayNumber, -1);
@@ -52,6 +53,5 @@ void main() {
       expect(task.daysLeft, 7);
       expect(task.toLine(), line);
     });
-
   });
 }

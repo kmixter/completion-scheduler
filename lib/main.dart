@@ -9,6 +9,7 @@ import 'package:path/path.dart' as path;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'notes_file.dart';
+import 'task.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -88,6 +89,7 @@ class _MyHomePageState extends State<MyHomePage>
   late TabController _tabController;
   NotesFile? _notesFile;
   DateTime? _selectedDate;
+  TextEditingController _notesController = TextEditingController();
 
   @override
   void initState() {
@@ -95,6 +97,11 @@ class _MyHomePageState extends State<MyHomePage>
     _tabController = TabController(length: 2, vsync: this);
     _loadNoteFiles();
     _pickSelectedFileBasedOnCwd();
+    _notesController.addListener(() {
+      setState(() {
+        _hasChanges = true;
+      });
+    });
   }
 
   Future<void> _loadNoteFiles() async {
@@ -139,8 +146,9 @@ class _MyHomePageState extends State<MyHomePage>
       return;
     }
     print('Loading notes from ${file.path}');
-    final notesFile = NotesFile(file);
-    await notesFile.parse();
+    final content = await file.readAsString();
+    final notesFile = NotesFile();
+    await notesFile.parse(content);
 
     final currentDate = DateTime.now();
     if (notesFile.regions.isEmpty) {
@@ -155,19 +163,22 @@ class _MyHomePageState extends State<MyHomePage>
       _selectedFile = file;
       _notesFile = notesFile;
       _selectedDate = notesFile.getDates().last;
-      _populateTasksForSelectedDate();
+      _populateTabsForSelectedDate();
     });
   }
 
-  void _populateTasksForSelectedDate() {
+  void _populateTabsForSelectedDate() {
     if (_notesFile == null || _selectedDate == null) return;
-    final tasks = _notesFile!.getTasksForDate(_selectedDate!);
+    final region = _notesFile!.getRegion(_selectedDate!);
+    final tasks = region.tasks;
+    final notes = region.getNotesString();
     setState(() {
-      _items = tasks.map((task) => task.desc).toList();
+      _items = tasks.map((task) => task.toLine()).toList();
       _controllers.clear();
       for (var item in _items) {
         _controllers.add(TextEditingController(text: item));
       }
+      _notesController.text = notes;
     });
   }
 
@@ -211,8 +222,12 @@ class _MyHomePageState extends State<MyHomePage>
       }
     }
     print('Saving notes to ${_selectedFile!.path}');
-    final contents =
-        _controllers.map((controller) => '${controller.text}\n').join('');
+    final region = _notesFile!.getRegion(_selectedDate!);
+    region.tasks = _controllers
+        .map((controller) => Task.fromLine(controller.text))
+        .toList();
+    region.setNotesFromString(_notesController.text);
+    final contents = _notesFile!.toString();
     await _selectedFile!.writeAsString(contents);
     await _saveNotesToDrive(contents); // Save notes to Google Drive
     setState(() {
@@ -507,7 +522,18 @@ $contents
           child: Scaffold(
             appBar: AppBar(
               backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-              title: Text('Completion Scheduler'),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_getNotesDescriptor(_selectedFile?.path ?? '')),
+                  if (_selectedDate != null)
+                    Text(
+                      DateFormat(defaultDateFormat).format(_selectedDate!),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
+                    ),
+                ],
+              ),
               actions: [
                 IconButton(
                   icon: const Icon(Icons.login),
@@ -520,10 +546,6 @@ $contents
                           _saveNotes();
                         }
                       : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: _addNewItem,
                 ),
               ],
             ),
@@ -544,62 +566,65 @@ $contents
                     ),
                   ),
                   ListTile(
-                    title: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Select a notes file'),
-                        DropdownButton<File>(
-                          value: _selectedFile,
-                          hint: const Text('Select a notes file'),
-                          items: [
-                            ..._noteFiles.map((file) {
-                              return DropdownMenuItem<File>(
-                                value: file,
-                                child: Text(_getNotesDescriptor(file.path)),
-                              );
-                            }).toList(),
-                            const DropdownMenuItem<File>(
-                              value: null,
-                              child: Text('<create a new file>'),
-                            ),
-                          ],
-                          onChanged: (file) {
-                            _loadNotes(file);
-                          },
-                        ),
-                      ],
-                    ),
+                    title: const Text('Regions'),
+                  ),
+                  ...?_notesFile?.getDates().map((date) {
+                    return ListTile(
+                      title: Text(DateFormat(defaultDateFormat).format(date)),
+                      selected: _selectedDate == date,
+                      onTap: () {
+                        setState(() {
+                          _selectedDate = date;
+                          _populateTabsForSelectedDate();
+                          Navigator.pop(context); // Close the drawer
+                        });
+                      },
+                    );
+                  }).toList(),
+                  ListTile(
+                    title: const Text('<create new region>'),
+                    selected: _selectedDate == DateTime.now(),
+                    onTap: () {
+                      setState(() {
+                        _selectedDate = DateTime.now();
+                        _populateTabsForSelectedDate();
+                        Navigator.pop(context); // Close the drawer
+                      });
+                    },
+                  ),
+                  Divider(),
+                  ListTile(
+                    title: const Text('Projects'),
+                  ),
+                  ..._noteFiles.map((file) {
+                    return ListTile(
+                      title: Text(_getNotesDescriptor(file.path)),
+                      selected: _selectedFile == file,
+                      onTap: () {
+                        setState(() {
+                          _selectedFile = file;
+                          _loadNotes(file);
+                          Navigator.pop(context); // Close the drawer
+                        });
+                      },
+                    );
+                  }).toList(),
+                  ListTile(
+                    title: const Text('<create a new file>'),
+                    selected: _selectedFile == null,
+                    onTap: () {
+                      setState(() {
+                        _selectedFile = null;
+                        _loadNotes(null);
+                        Navigator.pop(context); // Close the drawer
+                      });
+                    },
                   ),
                 ],
               ),
             ),
             body: Column(
               children: [
-                Center(
-                  child: DropdownButton<DateTime>(
-                    value: _selectedDate,
-                    hint: const Text('Choose region'),
-                    items: [
-                      ...?_notesFile?.getDates().map((date) {
-                        return DropdownMenuItem<DateTime>(
-                          value: date,
-                          child:
-                              Text(DateFormat(defaultDateFormat).format(date)),
-                        );
-                      }).toList(),
-                      DropdownMenuItem<DateTime>(
-                        value: DateTime.now(),
-                        child: const Text('<create new region>'),
-                      ),
-                    ],
-                    onChanged: (date) {
-                      setState(() {
-                        _selectedDate = date;
-                        _populateTasksForSelectedDate();
-                      });
-                    },
-                  ),
-                ),
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -623,8 +648,16 @@ $contents
                           );
                         },
                       ),
-                      Center(
-                        child: Text('Notes section'),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: TextField(
+                          controller: _notesController,
+                          maxLines: null,
+                          decoration: InputDecoration(
+                            hintText: 'Enter notes',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -638,6 +671,13 @@ $contents
                 Tab(icon: Icon(Icons.note), text: 'Notes'),
               ],
             ),
+            floatingActionButton: _tabController.index == 0
+                ? FloatingActionButton(
+                    onPressed: _addNewItem,
+                    tooltip: 'Add Task',
+                    child: const Icon(Icons.add),
+                  )
+                : null,
           ),
         ),
       ),
@@ -675,6 +715,7 @@ $contents
     for (var controller in _controllers) {
       controller.dispose();
     }
+    _notesController.dispose();
     super.dispose();
   }
 }

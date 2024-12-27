@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
 
 class Task {
-  static const List<String> dayOfWeekStrings = ['M', 'T', 'W', 'R', 'F', 'S', 'N'];
+  static const List<String> dayOfWeekStrings = [
+    'M',
+    'T',
+    'W',
+    'R',
+    'F',
+    'S',
+    'N'
+  ];
 
   static final RegExp durationRe = RegExp(r' ([\d\.]+)m\b| ([\d\.]+)hr(s)?\b');
   static final RegExp dueDateRe = RegExp(r' <=(\d+)/(\d+)\b');
@@ -36,11 +44,12 @@ class Task {
       dayNumber = dayOfWeekStrings.indexOf(line[0]);
     }
     desc = _stripAnnotations(line.substring(2));
-    desc = desc.replaceAll(durationRe, '')
-                .replaceAll(dueDateRe, '')
-                .replaceAll(startTimeRe, '')
-                .replaceAll(spentTimeRe, '')
-                .trim();
+    desc = desc
+        .replaceAll(durationRe, '')
+        .replaceAll(dueDateRe, '')
+        .replaceAll(startTimeRe, '')
+        .replaceAll(spentTimeRe, '')
+        .trim();
 
     // Parse duration
     final durationMatch = durationRe.firstMatch(line);
@@ -57,7 +66,10 @@ class Task {
       final dueDay = int.parse(dueDateMatch.group(2)!);
       final currentDate = now ?? DateTime.now();
       dueDate = DateTime(currentDate.year, dueMonth, dueDay);
-      daysLeft = dueDate!.difference(DateTime(currentDate.year, currentDate.month, currentDate.day)).inDays;
+      daysLeft = dueDate!
+          .difference(
+              DateTime(currentDate.year, currentDate.month, currentDate.day))
+          .inDays;
     }
 
     // Parse start time
@@ -102,10 +114,12 @@ class Task {
       line += ' <=${dueDate!.month}/${dueDate!.day}';
     }
 
-    if (dayNumber == -1 && (startTime != null || isElapsed || hasCompletionRate)) {
+    if (dayNumber == -1 &&
+        (startTime != null || isElapsed || hasCompletionRate)) {
       final annotations = <String>[];
       if (startTime != null) {
-        annotations.add('@${startTime!.hour}:${startTime!.minute.toString().padLeft(2, '0')}');
+        annotations.add(
+            '@${startTime!.hour}:${startTime!.minute.toString().padLeft(2, '0')}');
       }
       if (isElapsed) {
         annotations.add('ELAPSED!');
@@ -121,7 +135,9 @@ class Task {
   // Helper method to format minutes
   String formatMinutes(double minutes) {
     if (minutes >= 90 || minutes == 60) {
-      return '${(minutes / 60).toStringAsFixed(2)}hr';
+      String hoursStr = (minutes / 60).toStringAsFixed(2);
+      hoursStr = hoursStr.replaceAll(RegExp(r'\.?0*$'), '');
+      return '${hoursStr}hr';
     }
     return '${minutes.toInt()}m';
   }

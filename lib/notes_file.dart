@@ -1,15 +1,14 @@
-import 'dart:io';
 import 'task.dart';
 import 'package:intl/intl.dart';
 
 class NotesFile {
-  final File file;
   final List<NotesRegion> regions = [];
 
-  NotesFile(this.file);
-
-  Future<void> parse() async {
-    final lines = await file.readAsLines();
+  Future<void> parse(String content) async {
+    final lines = content.split('\n');
+    if (lines.isNotEmpty && lines.last.isEmpty) {
+      lines.removeLast();
+    }
     NotesRegion? currentRegion;
     regions.clear();
     for (var i = 0; i < lines.length; i++) {
@@ -61,37 +60,12 @@ class NotesFile {
     return regions.map((region) => _parseDate(region.dateLine)!).toList();
   }
 
-  List<Task> getTasksForDate(DateTime date) {
-    final region = _getRegionForDate(date);
-    return region.tasks;
-  }
-
-  String getNotesForDate(DateTime date) {
-    final region = _getRegionForDate(date);
-    return region.notes.map((a) => '$a\n').join('');
-  }
-
-  Future<void> replaceTasksForDate(DateTime date, List<Task> tasks) async {
-    final region = _getRegionForDate(date);
-    region.tasks = tasks;
-    await _rewriteFile();
-  }
-
-  Future<void> replaceNotesForDate(DateTime date, String notes) async {
-    final region = _getRegionForDate(date);
-    if (!notes.endsWith('\n')) {
-      throw ArgumentError('Notes must end with a newline character.');
-    }
-    region.notes = notes.substring(0, notes.length - 1).split('\n');
-    await _rewriteFile();
-  }
-
-  NotesRegion _getRegionForDate(DateTime date) {
+  NotesRegion getRegion(DateTime date) {
     return regions.firstWhere((region) => _parseDate(region.dateLine) == date);
   }
 
-  Future<void> _rewriteFile() async {
-    // TOOD(): Do this atomically.
+  @override
+  String toString() {
     final buffer = StringBuffer();
     for (var region in regions) {
       buffer.writeln(region.dateLine);
@@ -102,7 +76,7 @@ class NotesFile {
       }
       buffer.writeln(region.notes.join('\n'));
     }
-    await file.writeAsString(buffer.toString());
+    return buffer.toString();
   }
 
   bool _isDateLine(String line) {
@@ -150,4 +124,15 @@ class NotesRegion {
     required this.separatorLine,
     required this.startLine,
   });
+
+  void setNotesFromString(String notesString) {
+    notes = notesString.split('\n');
+    if (notes.last.isEmpty) {
+      notes.removeLast();
+    }
+  }
+
+  String getNotesString() {
+    return notes.map((a) => '$a\n').join('');
+  }
 }
