@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:oauth2/oauth2.dart' as oauth2;
+import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
@@ -100,6 +102,22 @@ class _MyHomePageState extends State<MyHomePage>
         _hasChanges = true;
       });
     });
+
+    _refreshAccessToken().then((_) async {
+      if (_oauth2Client != null) {
+        await _postLoginWithOAuth2();
+      }
+    });
+  }
+
+  Future<Directory> _getPreferencesDirectory() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final preferencesDirectory =
+        Directory(path.join(directory.path, '.config/completion_scheduler'));
+    if (!await preferencesDirectory.exists()) {
+      await preferencesDirectory.create(recursive: true);
+    }
+    return preferencesDirectory;
   }
 
   Future<void> _loadNoteFiles() async {
@@ -362,8 +380,13 @@ $contents
       secret: widget.secret,
     );
 
-    final authorizationUrl =
+    Uri authorizationUrl =
         grant.getAuthorizationUrl(widget.redirectUrl, scopes: _scopes);
+    authorizationUrl = authorizationUrl.replace(queryParameters: {
+      ...authorizationUrl.queryParameters,
+      'access_type': 'offline',
+      'prompt': 'select_account consent'
+    });
 
     await launch(authorizationUrl.toString());
 
@@ -377,6 +400,13 @@ $contents
       print('Access token: ${client.credentials.accessToken}');
     });
 
+    if (!client.credentials.canRefresh) {
+      print('No refresh token received');
+    }
+
+    // Store the refresh token
+    await _storeRefreshToken(client.credentials.refreshToken);
+
     request.response
       ..statusCode = HttpStatus.ok
       ..headers.set('Content-Type', ContentType.html.mimeType)
@@ -385,8 +415,52 @@ $contents
     await request.response.close();
     await server.close();
 
+    await _postLoginWithOAuth2();
+  }
+
+  Future<void> _postLoginWithOAuth2() async {
     await _findOrCreateCompletionRateFolderWithOAuth2();
     await _reconcileWithOAuth2();
+  }
+
+  Future<void> _storeRefreshToken(String? refreshToken) async {
+    if (refreshToken != null) {
+      final directory = await _getPreferencesDirectory();
+      final file = File(path.join(directory.path, 'refresh_token.txt'));
+      await file.writeAsString(refreshToken);
+    }
+  }
+
+  Future<String?> _loadRefreshToken() async {
+    final directory = await _getPreferencesDirectory();
+    final file = File(path.join(directory.path, 'refresh_token.txt'));
+    if (await file.exists()) {
+      return await file.readAsString();
+    }
+    return null;
+  }
+
+  Future<void> _refreshAccessToken() async {
+    final refreshToken = await _loadRefreshToken();
+    if (refreshToken != null) {
+      final credentials = oauth2.Credentials(
+        '',
+        refreshToken: refreshToken,
+        tokenEndpoint: widget.tokenEndpoint,
+      );
+
+      final client = oauth2.Client(credentials,
+          identifier: widget.identifier, secret: widget.secret);
+      await client.refreshCredentials();
+
+      setState(() {
+        _oauth2Client = client;
+        print('Refreshed access token: ${client.credentials.accessToken}');
+      });
+
+      // Store the new refresh token
+      await _storeRefreshToken(client.credentials.refreshToken);
+    }
   }
 
   Future<void> _findOrCreateCompletionRateFolderWithOAuth2() async {
