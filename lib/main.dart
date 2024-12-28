@@ -421,6 +421,7 @@ $contents
   Future<void> _postLoginWithOAuth2() async {
     await _findOrCreateCompletionRateFolderWithOAuth2();
     await _reconcileWithOAuth2();
+    _loadNoteFiles();
   }
 
   Future<void> _storeRefreshToken(String? refreshToken) async {
