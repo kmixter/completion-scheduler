@@ -29,7 +29,6 @@ class Task {
     required this.desc,
     this.duration,
     this.dueDate,
-    this.daysLeft,
     this.startTime,
     this.spentMinutes,
   });
@@ -65,11 +64,7 @@ class Task {
       final dueMonth = int.parse(dueDateMatch.group(1)!);
       final dueDay = int.parse(dueDateMatch.group(2)!);
       final currentDate = now ?? DateTime.now();
-      dueDate = DateTime(currentDate.year, dueMonth, dueDay);
-      daysLeft = dueDate!
-          .difference(
-              DateTime(currentDate.year, currentDate.month, currentDate.day))
-          .inDays;
+      dueDate = DateTime(currentDate.year, dueMonth, dueDay, 23, 59, 59);
     }
 
     // Parse start time
@@ -89,6 +84,17 @@ class Task {
         spentMinutes = spentMinutes! * 60;
       }
     }
+  }
+
+  void computeDaysLeft({DateTime? now}) {
+    if (dueDate == null) {
+      daysLeft = null;
+      return;
+    }
+    final currentDate = now ?? DateTime.now();
+    final msecPerDay = 1000 * 60 * 60 * 24;
+    final timeDelta = dueDate!.millisecondsSinceEpoch - currentDate.millisecondsSinceEpoch;
+    daysLeft = (timeDelta / msecPerDay).ceil();
   }
 
   String _stripAnnotations(String desc) {
@@ -133,7 +139,7 @@ class Task {
   }
 
   // Helper method to format minutes
-  String formatMinutes(double minutes) {
+  static String formatMinutes(double minutes) {
     if (minutes >= 90 || minutes == 60) {
       String hoursStr = (minutes / 60).toStringAsFixed(2);
       hoursStr = hoursStr.replaceAll(RegExp(r'\.?0*$'), '');

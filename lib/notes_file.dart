@@ -91,6 +91,12 @@ class NotesFile {
     return region;
   }
 
+  void recompute({DateTime? now}) {
+    for (var region in regions) {
+      region.recompute(now: now);
+    }
+  }
+
   StringBuffer _toStringBuffer() {
     final buffer = StringBuffer();
     for (var region in regions) {
@@ -169,5 +175,78 @@ class NotesRegion {
 
   String getNotesString() {
     return notes.map((a) => '$a\n').join('');
+  }
+
+  void recompute({DateTime? now}) {
+    for (var task in tasks) {
+      task.computeDaysLeft(now: now);
+    }
+    sortTasks();
+    final totalsAnnotation = getTotalsAnnotation();
+    if (totalsAnnotation == null) {
+      todoLine = 'TODOs:';
+    } else {
+      todoLine = _formatAnnotations('TODOs:', [totalsAnnotation]);
+    }
+  }
+
+  void sortTasks() {
+    final pending = <Task>[];
+    final completedByDay = List.generate(7, (_) => <Task>[]);
+
+    for (final task in tasks) {
+      if (task.dayNumber >= 0) {
+        completedByDay[task.dayNumber].add(task);
+      } else {
+        pending.add(task);
+      }
+    }
+
+    pending.sort((a, b) => _getPendingTaskPriority(b) > _getPendingTaskPriority(a) ? 1 : -1);
+
+    final sortedTasks = <Task>[];
+    sortedTasks.addAll(pending);
+    for (final dayTasks in completedByDay) {
+      sortedTasks.addAll(dayTasks);
+    }
+
+    tasks = sortedTasks;
+  }
+
+  static double _getPendingTaskPriority(Task task) {
+    if (!task.hasCompletionRate) {
+      return -1;
+    }
+    if (task.isElapsed) {
+      return double.maxFinite;
+    }
+    return task.getCompletionRate();
+  }
+
+  String? getTotalsAnnotation() {
+    if (tasks.any((task) => task.isElapsed)) {
+      return '∑: ELAPSED!';
+    }
+    double sumCompletionRate = 0;
+    for (final task in tasks) {
+      sumCompletionRate += task.getCompletionRate();
+    }
+    if (sumCompletionRate == 0) {
+      return null;
+    }
+    return '∑: ${Task.formatMinutes(sumCompletionRate)}/d';
+  }
+
+  static String _formatAnnotations(String line, List<String> annotations) {
+    line = _stripAnnotations(line);
+    return '${line.padRight(65)} ## ${annotations.join(' ')}';
+  }
+
+  static String _stripAnnotations(String line) {
+    final index = line.indexOf('##');
+    if (index != -1) {
+      line = line.substring(0, index).trim();
+    }
+    return line;
   }
 }

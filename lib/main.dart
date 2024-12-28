@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
+import 'package:watcher/watcher.dart';
 import 'notes_file.dart';
 import 'task.dart';
 
@@ -89,7 +90,8 @@ class _MyHomePageState extends State<MyHomePage>
   late TabController _tabController;
   NotesFile? _notesFile;
   DateTime? _selectedDate;
-  TextEditingController _notesController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+  FileWatcher? _fileWatcher;
 
   @override
   void initState() {
@@ -108,6 +110,17 @@ class _MyHomePageState extends State<MyHomePage>
         await _postLoginWithOAuth2();
       }
     });
+  }
+
+  void _initializeFileWatcher() {
+    if (_selectedFile != null) {
+      _fileWatcher = FileWatcher(_selectedFile!.path);
+      _fileWatcher!.events.listen((event) {
+        if (event.type == ChangeType.MODIFY) {
+          _loadNotes(_selectedFile);
+        }
+      });
+    }
   }
 
   Future<Directory> _getPreferencesDirectory() async {
@@ -176,6 +189,8 @@ class _MyHomePageState extends State<MyHomePage>
       _selectedDate = notesFile.getDates().last;
       _populateTabsForSelectedDate();
     });
+
+    _initializeFileWatcher();
   }
 
   void _populateTabsForSelectedDate() {
@@ -219,6 +234,14 @@ class _MyHomePageState extends State<MyHomePage>
       _controllers.add(controller);
       _focusNodes.add(focusNode);
     }
+  }
+
+  String getTasksTabText() {
+    String? totalsAnnotation;
+    if (_selectedDate != null) {
+      totalsAnnotation = _notesFile?.getRegion(_selectedDate!).getTotalsAnnotation();
+    }
+    return totalsAnnotation != null ? 'Tasks ($totalsAnnotation)' : 'Tasks';
   }
 
   Future<void> _showFailedToSelectDirectoryDialog(
@@ -766,7 +789,7 @@ $contents
             bottomNavigationBar: TabBar(
               controller: _tabController,
               tabs: [
-                Tab(icon: Icon(Icons.list), text: 'Tasks'),
+                Tab(icon: Icon(Icons.list), text: getTasksTabText()),
                 Tab(icon: Icon(Icons.note), text: 'Notes'),
               ],
             ),
@@ -810,6 +833,7 @@ $contents
 
   @override
   void dispose() {
+    _fileWatcher = null;
     _tabController.dispose();
     for (var controller in _controllers) {
       controller.dispose();

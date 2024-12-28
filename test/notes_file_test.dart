@@ -138,5 +138,36 @@ Notes for 12/10.
       expect(newContent,
           'Sun, Oct 1, 2023\n----------------\nTODOs:\nM First Task\n\n');
     });
+
+    test('test recompute day of week order', () async {
+      final notes = NotesFile();
+      final region = notes.createRegion(DateTime(2023, 10, 1));
+      region.tasks.add(Task(dayNumber: 1, desc: 'Second Task'));
+      region.tasks.add(Task(dayNumber: 0, desc: 'FIrst Task'));
+      expect(region.tasks[0].dayNumber, 1);
+      expect(region.tasks[1].dayNumber, 0);
+      notes.recompute();
+      expect(region.tasks.length, 2);
+      expect(region.tasks[0].dayNumber, 0);
+      expect(region.tasks[1].dayNumber, 1);
+      expect(region.todoLine, 'TODOs:');
+    });
+
+    test('test recompute pending by completion rate', () async {
+      final notes = NotesFile();
+      final region = notes.createRegion(DateTime(2023, 10, 1));
+      region.tasks.add(Task(dayNumber: -1, desc: 'Task 1', duration: 6, dueDate: DateTime(2023, 10, 7)));
+      region.tasks.add(Task(dayNumber: -1, desc: 'Task 2', duration: 6, dueDate: DateTime(2023, 10, 4)));
+      final now = DateTime(2023, 10, 1);
+      notes.recompute(now: now);
+      expect(region.tasks.length, 2);
+      expect(region.tasks[0].desc, 'Task 2');
+      expect(region.tasks[0].getCompletionRate(), 2);
+      expect(region.tasks[1].desc, 'Task 1');
+      expect(region.tasks[1].getCompletionRate(), 1);
+
+      expect(region.getTotalsAnnotation(), '∑: 3m/d');
+      expect(region.todoLine, 'TODOs:                                                            ## ∑: 3m/d');
+    });
   });
 }
