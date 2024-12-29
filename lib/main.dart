@@ -53,7 +53,6 @@ class _MyHomePageState extends State<MyHomePage>
   bool _hasChanges = false;
   List<File> _noteFiles = [];
   File? _selectedFile;
-  late TabController _tabController;
   NotesFile? _notesFile;
   DateTime? _selectedDate;
   final TextEditingController _notesController = TextEditingController();
@@ -64,7 +63,6 @@ class _MyHomePageState extends State<MyHomePage>
   void initState() {
     super.initState();
     _initDriveSync();
-    _tabController = TabController(length: 2, vsync: this);
     _loadNoteFiles();
     _pickSelectedFileBasedOnCwd();
     _notesController.addListener(() {
@@ -400,61 +398,49 @@ class _MyHomePageState extends State<MyHomePage>
             body: Column(
               children: [
                 Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      ListView.builder(
-                        itemCount: _controllers.length,
-                        itemBuilder: (context, index) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 0, horizontal: 8.0),
-                            child: TextField(
-                              controller: _controllers[index],
-                              focusNode: _focusNodes[index],
-                              decoration:
-                                  InputDecoration(hintText: 'Enter task'),
-                              style: TextStyle(fontSize: 24),
-                              onChanged: (newValue) {
-                                setState(() {
-                                  _hasChanges = true;
-                                });
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: TextField(
-                          controller: _notesController,
-                          maxLines: null,
-                          decoration: InputDecoration(
-                            hintText: 'Enter notes',
-                            border: OutlineInputBorder(),
+                  child: ListView.builder(
+                    itemCount: _controllers.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index < _controllers.length) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 0, horizontal: 8.0),
+                          child: TextField(
+                            controller: _controllers[index],
+                            focusNode: _focusNodes[index],
+                            decoration: InputDecoration(hintText: 'Enter task'),
+                            style: TextStyle(fontSize: 24),
+                            onChanged: (newValue) {
+                              setState(() {
+                                _hasChanges = true;
+                              });
+                            },
                           ),
-                          style: TextStyle(fontSize: 24),
-                        ),
-                      ),
-                    ],
+                        );
+                      } else {
+                        return Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: TextField(
+                            controller: _notesController,
+                            maxLines: null,
+                            decoration: InputDecoration(
+                              hintText: 'Enter notes',
+                              border: OutlineInputBorder(),
+                            ),
+                            style: TextStyle(fontSize: 24),
+                          ),
+                        );
+                      }
+                    },
                   ),
                 ),
               ],
             ),
-            bottomNavigationBar: TabBar(
-              controller: _tabController,
-              tabs: [
-                Tab(icon: Icon(Icons.list), text: getTasksTabText()),
-                Tab(icon: Icon(Icons.note), text: 'Notes'),
-              ],
+            floatingActionButton: FloatingActionButton(
+              onPressed: _addNewItem,
+              tooltip: 'Add Task',
+              child: const Icon(Icons.add),
             ),
-            floatingActionButton: _tabController.index == 0
-                ? FloatingActionButton(
-                    onPressed: _addNewItem,
-                    tooltip: 'Add Task',
-                    child: const Icon(Icons.add),
-                  )
-                : null,
           ),
         ),
       ),
@@ -489,7 +475,6 @@ class _MyHomePageState extends State<MyHomePage>
   @override
   void dispose() {
     _fileWatcher = null;
-    _tabController.dispose();
     for (var controller in _controllers) {
       controller.dispose();
     }
