@@ -65,6 +65,7 @@ class Task {
       final dueDay = int.parse(dueDateMatch.group(2)!);
       final currentDate = now ?? DateTime.now();
       dueDate = DateTime(currentDate.year, dueMonth, dueDay, 23, 59, 59);
+      computeDaysLeft(now: now);
     }
 
     // Parse start time
@@ -93,7 +94,8 @@ class Task {
     }
     final currentDate = now ?? DateTime.now();
     final msecPerDay = 1000 * 60 * 60 * 24;
-    final timeDelta = dueDate!.millisecondsSinceEpoch - currentDate.millisecondsSinceEpoch;
+    final timeDelta =
+        dueDate!.millisecondsSinceEpoch - currentDate.millisecondsSinceEpoch;
     daysLeft = (timeDelta / msecPerDay).ceil();
   }
 
@@ -145,7 +147,7 @@ class Task {
       hoursStr = hoursStr.replaceAll(RegExp(r'\.?0*$'), '');
       return '${hoursStr}hr';
     }
-    return '${minutes.toInt()}m';
+    return '${minutes.round()}m';
   }
 
   bool get isElapsed => daysLeft != null && daysLeft! < 1;

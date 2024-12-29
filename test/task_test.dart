@@ -35,22 +35,22 @@ void main() {
       expect(task.dayNumber, 0);
       expect(task.desc, 'This is a TODO with a due date');
       final currentYear = DateTime.now().year;
-      expect(task.dueDate, DateTime(currentYear, 12, 31));
+      expect(task.dueDate, DateTime(currentYear, 12, 31, 23, 59, 59));
       expect(task.toLine(), line);
     });
 
     test('parse() and toLine() - TODO with all annotations', () {
       const line =
           '* This is a TODO with all bells and whistles 76m +2hr <=12/31 ## @8:56 10m/d';
-      final fixedDate = DateTime(2024, 12, 24);
+      final fixedDate = DateTime(2024, 12, 24, 8, 56);
       final task = Task.fromLine(line, now: fixedDate);
       expect(task.dayNumber, -1);
       expect(task.desc, 'This is a TODO with all bells and whistles');
       expect(task.duration, 76);
-      expect(task.dueDate, DateTime(2024, 12, 31));
+      expect(task.dueDate, DateTime(2024, 12, 31, 23, 59, 59));
       expect(task.startTime, const TimeOfDay(hour: 8, minute: 56));
       expect(task.spentMinutes, 120);
-      expect(task.daysLeft, 7);
+      expect(task.daysLeft, 8);
       expect(task.toLine(), line);
     });
   });
