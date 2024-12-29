@@ -407,12 +407,14 @@ class _MyHomePageState extends State<MyHomePage>
                         itemCount: _controllers.length,
                         itemBuilder: (context, index) {
                           return Padding(
-                            padding: const EdgeInsets.all(8.0),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 0, horizontal: 8.0),
                             child: TextField(
                               controller: _controllers[index],
                               focusNode: _focusNodes[index],
                               decoration:
                                   InputDecoration(hintText: 'Enter task'),
+                              style: TextStyle(fontSize: 24),
                               onChanged: (newValue) {
                                 setState(() {
                                   _hasChanges = true;
@@ -431,6 +433,7 @@ class _MyHomePageState extends State<MyHomePage>
                             hintText: 'Enter notes',
                             border: OutlineInputBorder(),
                           ),
+                          style: TextStyle(fontSize: 24),
                         ),
                       ),
                     ],
