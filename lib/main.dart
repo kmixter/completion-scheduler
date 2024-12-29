@@ -1,76 +1,46 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:http/http.dart' as http;
-import 'package:oauth2/oauth2.dart' as oauth2;
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as path;
-import 'package:url_launcher/url_launcher.dart';
+import 'package:logging/logging.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as path;
 import 'package:watcher/watcher.dart';
+import 'drive_sync.dart';
 import 'notes_file.dart';
 import 'task.dart';
 
+final Logger _logger = Logger('main');
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final credentials = await loadCredentials();
-  runApp(MyApp(credentials: credentials));
-}
+  Logger.root.level = Level.ALL;
 
-Future<Map<String, dynamic>> loadCredentials() async {
-  final file = File('assets/client_secret.json');
-  final contents = await file.readAsString();
-  return jsonDecode(contents);
+  Logger.root.onRecord.listen((record) {
+    print('${record.level.name}: ${record.time}: ${record.message}');
+  });
+
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  final Map<String, dynamic> credentials;
-
-  const MyApp({Key? key, required this.credentials}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final authorizationEndpoint = Uri.parse(credentials['web']['auth_uri']);
-    final tokenEndpoint = Uri.parse(credentials['web']['token_uri']);
-    final identifier = credentials['web']['client_id'];
-    final secret = credentials['web']['client_secret'];
-    final redirectUrl = Uri.parse(credentials['web']['redirect_uris'][0]);
-
     return MaterialApp(
       title: 'Completion Scheduler',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: MyHomePage(
-        authorizationEndpoint: authorizationEndpoint,
-        tokenEndpoint: tokenEndpoint,
-        identifier: identifier,
-        secret: secret,
-        redirectUrl: redirectUrl,
-      ),
+      home: MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  final Uri authorizationEndpoint;
-  final Uri tokenEndpoint;
-  final String identifier;
-  final String secret;
-  final Uri redirectUrl;
-
-  const MyHomePage({
-    Key? key,
-    required this.authorizationEndpoint,
-    required this.tokenEndpoint,
-    required this.identifier,
-    required this.secret,
-    required this.redirectUrl,
-  }) : super(key: key);
+  const MyHomePage({super.key});
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -81,10 +51,6 @@ class _MyHomePageState extends State<MyHomePage>
   final List<TextEditingController> _controllers = [];
   final List<FocusNode> _focusNodes = [];
   bool _hasChanges = false;
-  GoogleSignInAccount? _currentUser;
-  oauth2.Client? _oauth2Client;
-  String? _completionRateFolderId;
-  static const _scopes = ['https://www.googleapis.com/auth/drive.file'];
   List<File> _noteFiles = [];
   File? _selectedFile;
   late TabController _tabController;
@@ -92,10 +58,12 @@ class _MyHomePageState extends State<MyHomePage>
   DateTime? _selectedDate;
   final TextEditingController _notesController = TextEditingController();
   FileWatcher? _fileWatcher;
+  late DriveSync _driveSync;
 
   @override
   void initState() {
     super.initState();
+    _initDriveSync();
     _tabController = TabController(length: 2, vsync: this);
     _loadNoteFiles();
     _pickSelectedFileBasedOnCwd();
@@ -104,10 +72,15 @@ class _MyHomePageState extends State<MyHomePage>
         _hasChanges = true;
       });
     });
+  }
 
-    _refreshAccessToken().then((_) async {
-      if (_oauth2Client != null) {
-        await _postLoginWithOAuth2();
+  Future<void> _initDriveSync() async {
+    _driveSync = DriveSync();
+    await _driveSync.loadCredentials();
+
+    _driveSync.refreshAccessToken().then((_) async {
+      if (_driveSync.oauth2Client != null) {
+        await _driveSync.postLoginWithOAuth2();
       }
     });
   }
@@ -121,16 +94,6 @@ class _MyHomePageState extends State<MyHomePage>
         }
       });
     }
-  }
-
-  Future<Directory> _getPreferencesDirectory() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final preferencesDirectory =
-        Directory(path.join(directory.path, '.config/completion_scheduler'));
-    if (!await preferencesDirectory.exists()) {
-      await preferencesDirectory.create(recursive: true);
-    }
-    return preferencesDirectory;
   }
 
   Future<void> _loadNoteFiles() async {
@@ -173,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage>
       });
       return;
     }
-    print('Loading notes from ${file.path}');
+    _logger.info('Loading notes from ${file.path}');
     final content = await file.readAsString();
     final notesFile = NotesFile();
     await notesFile.parse(content);
@@ -239,7 +202,8 @@ class _MyHomePageState extends State<MyHomePage>
   String getTasksTabText() {
     String? totalsAnnotation;
     if (_selectedDate != null) {
-      totalsAnnotation = _notesFile?.getRegion(_selectedDate!).getTotalsAnnotation();
+      totalsAnnotation =
+          _notesFile?.getRegion(_selectedDate!).getTotalsAnnotation();
     }
     return totalsAnnotation != null ? 'Tasks ($totalsAnnotation)' : 'Tasks';
   }
@@ -283,7 +247,7 @@ class _MyHomePageState extends State<MyHomePage>
         break;
       }
     }
-    print('Saving notes to ${_selectedFile!.path}');
+    _logger.info('Saving notes to ${_selectedFile!.path}');
     final region = _notesFile!.getRegion(_selectedDate!);
     region.tasks = _controllers
         .map((controller) => Task.fromLine(controller.text))
@@ -291,84 +255,12 @@ class _MyHomePageState extends State<MyHomePage>
     region.setNotesFromString(_notesController.text);
     final contents = _notesFile!.toString();
     await _selectedFile!.writeAsString(contents);
-    await _saveNotesToDrive(contents); // Save notes to Google Drive
+    String notesDescriptor = _driveSync.getNotesDescriptor(_selectedFile!.path);
+    await _driveSync.syncNotesToDrive(notesDescriptor, contents);
     setState(() {
       _hasChanges = false;
     });
     _loadNoteFiles(); // Reload the dropdown with available files
-  }
-
-  Future<void> _saveNotesToDrive(String contents) async {
-    if (_completionRateFolderId == null) {
-      print('Not logged in. Cannot save to Drive.');
-      return;
-    }
-
-    final fileName = '${_getNotesDescriptor(_selectedFile!.path)}.txt';
-    final headers = {
-      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
-      'Content-Type': 'application/json',
-    };
-
-    // Check if the file already exists in the folder
-    final searchResponse = await http.get(
-      Uri.parse(
-          'https://www.googleapis.com/drive/v3/files?q=name=\'$fileName\' and \'$_completionRateFolderId\' in parents'),
-      headers: headers,
-    );
-
-    final searchResult = jsonDecode(searchResponse.body);
-    if (searchResult['files'] != null && searchResult['files'].isNotEmpty) {
-      // File exists, update it
-      final fileId = searchResult['files'].first['id'];
-      final updateResponse = await http.patch(
-        Uri.parse(
-            'https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media'),
-        headers: {
-          'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
-          'Content-Type': 'text/plain',
-        },
-        body: contents,
-      );
-
-      if (updateResponse.statusCode != 200) {
-        print('Failed to update file: ${updateResponse.body}');
-      } else {
-        print('Updated file ID: $fileId');
-      }
-    } else {
-      // File does not exist, create it
-      final createResponse = await http.post(
-        Uri.parse(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart'),
-        headers: {
-          'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
-          'Content-Type': 'multipart/related; boundary=foo_bar_baz',
-        },
-        body: '''
---foo_bar_baz
-Content-Type: application/json; charset=UTF-8
-
-{
-  "name": "$fileName",
-  "parents": ["$_completionRateFolderId"]
-}
-
---foo_bar_baz
-Content-Type: text/plain
-
-$contents
---foo_bar_baz--
-''',
-      );
-
-      if (createResponse.statusCode != 200) {
-        print('Failed to create file: ${createResponse.body}');
-      } else {
-        final createdFile = jsonDecode(createResponse.body);
-        print('Created file ID: ${createdFile['id']}');
-      }
-    }
   }
 
   void _addNewItem() {
@@ -379,248 +271,7 @@ $contents
   }
 
   Future<void> _login() async {
-    if (Platform.isLinux) {
-      await _loginWithOAuth2();
-    } else if (Platform.isAndroid) {
-      await _loginWithGoogleSignIn();
-    }
-  }
-
-  Future<void> _loginWithGoogleSignIn() async {
-    final googleSignIn = GoogleSignIn.standard(scopes: _scopes);
-    final account = await googleSignIn.signIn();
-    setState(() {
-      _currentUser = account;
-      print('currentUser=$_currentUser');
-    });
-  }
-
-  Future<void> _loginWithOAuth2() async {
-    final grant = oauth2.AuthorizationCodeGrant(
-      widget.identifier,
-      widget.authorizationEndpoint,
-      widget.tokenEndpoint,
-      secret: widget.secret,
-    );
-
-    Uri authorizationUrl =
-        grant.getAuthorizationUrl(widget.redirectUrl, scopes: _scopes);
-    authorizationUrl = authorizationUrl.replace(queryParameters: {
-      ...authorizationUrl.queryParameters,
-      'access_type': 'offline',
-      'prompt': 'select_account consent'
-    });
-
-    await launch(authorizationUrl.toString());
-
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8080);
-    final request = await server.first;
-    final queryParams = request.uri.queryParameters;
-    final client = await grant.handleAuthorizationResponse(queryParams);
-
-    setState(() {
-      _oauth2Client = client;
-      print('Access token: ${client.credentials.accessToken}');
-    });
-
-    if (!client.credentials.canRefresh) {
-      print('No refresh token received');
-    }
-
-    // Store the refresh token
-    await _storeRefreshToken(client.credentials.refreshToken);
-
-    request.response
-      ..statusCode = HttpStatus.ok
-      ..headers.set('Content-Type', ContentType.html.mimeType)
-      ..write(
-          '<html><h1>Authentication successful! You can close this window.</h1></html>');
-    await request.response.close();
-    await server.close();
-
-    await _postLoginWithOAuth2();
-  }
-
-  Future<void> _postLoginWithOAuth2() async {
-    await _findOrCreateCompletionRateFolderWithOAuth2();
-    await _reconcileWithOAuth2();
-    _loadNoteFiles();
-  }
-
-  Future<void> _storeRefreshToken(String? refreshToken) async {
-    if (refreshToken != null) {
-      final directory = await _getPreferencesDirectory();
-      final file = File(path.join(directory.path, 'refresh_token.txt'));
-      await file.writeAsString(refreshToken);
-    }
-  }
-
-  Future<String?> _loadRefreshToken() async {
-    final directory = await _getPreferencesDirectory();
-    final file = File(path.join(directory.path, 'refresh_token.txt'));
-    if (await file.exists()) {
-      return await file.readAsString();
-    }
-    return null;
-  }
-
-  Future<void> _refreshAccessToken() async {
-    final refreshToken = await _loadRefreshToken();
-    if (refreshToken != null) {
-      final credentials = oauth2.Credentials(
-        '',
-        refreshToken: refreshToken,
-        tokenEndpoint: widget.tokenEndpoint,
-      );
-
-      final client = oauth2.Client(credentials,
-          identifier: widget.identifier, secret: widget.secret);
-      await client.refreshCredentials();
-
-      setState(() {
-        _oauth2Client = client;
-        print('Refreshed access token: ${client.credentials.accessToken}');
-      });
-
-      // Store the new refresh token
-      await _storeRefreshToken(client.credentials.refreshToken);
-    }
-  }
-
-  Future<void> _findOrCreateCompletionRateFolderWithOAuth2() async {
-    final headers = {
-      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
-      'Content-Type': 'application/json',
-    };
-
-    // Search for the folder
-    final searchResponse = await http.get(
-      Uri.parse(
-          'https://www.googleapis.com/drive/v3/files?q=name=\'completion-rate\' and mimeType=\'application/vnd.google-apps.folder\''),
-      headers: headers,
-    );
-
-    final searchResult = jsonDecode(searchResponse.body);
-    if (searchResult['files'] != null && searchResult['files'].isNotEmpty) {
-      // Folder exists
-      setState(() {
-        _completionRateFolderId = searchResult['files'].first['id'];
-        print('Found folder ID: $_completionRateFolderId');
-      });
-    } else {
-      // Folder does not exist, create it
-      final createResponse = await http.post(
-        Uri.parse('https://www.googleapis.com/drive/v3/files'),
-        headers: headers,
-        body: jsonEncode({
-          'name': 'completion-rate',
-          'mimeType': 'application/vnd.google-apps.folder',
-        }),
-      );
-
-      final createdFolder = jsonDecode(createResponse.body);
-      setState(() {
-        _completionRateFolderId = createdFolder['id'];
-        print('Created folder ID: $_completionRateFolderId');
-      });
-    }
-  }
-
-  Future<void> _reconcileWithOAuth2() async {
-    if (_completionRateFolderId == null) {
-      print('Completion rate folder ID is null. Cannot reconcile.');
-      return;
-    }
-
-    final headers = {
-      'Authorization': 'Bearer ${_oauth2Client!.credentials.accessToken}',
-      'Content-Type': 'application/json',
-    };
-
-    // List all files in the completion-rate folder
-    final listResponse = await http.get(
-      Uri.parse(
-          'https://www.googleapis.com/drive/v3/files?q=\'$_completionRateFolderId\' in parents'),
-      headers: headers,
-    );
-
-    final listResult = jsonDecode(listResponse.body);
-    if (listResult['files'] == null || listResult['files'].isEmpty) {
-      print('No files found in the completion-rate folder.');
-      return;
-    }
-
-    for (var file in listResult['files']) {
-      final driveFileName = file['name'];
-      print('Considering Drive file: $driveFileName');
-      print('All Drive metadata is: $file');
-      final localFilePath = _getNotesPathFromDriveFileName(driveFileName);
-      print('Equivalent local path: $localFilePath');
-      final localFile = File(localFilePath);
-
-      final driveFileResponse = await http.get(
-        Uri.parse(
-            'https://www.googleapis.com/drive/v3/files/${file['id']}?alt=media'),
-        headers: headers,
-      );
-
-      final driveFileContents = driveFileResponse.body;
-      final driveFileMetadataResponse = await http.get(
-        Uri.parse(
-            'https://www.googleapis.com/drive/v3/files/${file['id']}?fields=modifiedTime'),
-        headers: headers,
-      );
-      final driveFileMetadata = jsonDecode(driveFileMetadataResponse.body);
-      final driveFileModifiedTime =
-          DateTime.parse(driveFileMetadata['modifiedTime']);
-
-      if (await localFile.exists()) {
-        final localFileModifiedTime = await localFile.lastModified();
-        print(
-            'Comparing local ($localFileModifiedTime) vs drive ($driveFileModifiedTime)');
-        if (driveFileModifiedTime.isAfter(localFileModifiedTime)) {
-          // Drive file is newer, update local file
-          print('Synchronizing local file to drive');
-          await localFile.writeAsString(driveFileContents);
-
-          if (_selectedFile != null && _selectedFile!.path == localFilePath) {
-            // Reload notes if the selected file was updated.
-            await _loadNoteFiles();
-          }
-        } else {
-          print('Local file is newer than drive, letting using manually save');
-        }
-      } else {
-        // Local file does not exist, create it
-        await _createParentDirectories(localFilePath);
-        await localFile.writeAsString(driveFileContents);
-        print('Created local file: $localFilePath');
-      }
-    }
-  }
-
-  Future<void> _createParentDirectories(String filePath) async {
-    final directory = Directory(path.dirname(filePath));
-    if (!await directory.exists()) {
-      await directory.create(recursive: true);
-    }
-  }
-
-  String _getNotesDescriptor(String filepath) {
-    return path.basename(path.dirname(filepath));
-  }
-
-  String _getNotesPath(String descriptor) {
-    return path.join(
-        Platform.environment['HOME']!, 'prj', descriptor, 'notes.txt');
-  }
-
-  String _getNotesPathFromDriveFileName(String driveFileName) {
-    // strip off the '.txt' extension if it has one otherwise use the full name
-    final descriptor = driveFileName.endsWith('.txt')
-        ? driveFileName.substring(0, driveFileName.length - 4)
-        : driveFileName;
-    return _getNotesPath(descriptor);
+    await _driveSync.login();
   }
 
   @override
@@ -643,7 +294,8 @@ $contents
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_getNotesDescriptor(_selectedFile?.path ?? '')),
+                  Text(
+                      _driveSync.getNotesDescriptor(_selectedFile?.path ?? '')),
                   if (_selectedDate != null)
                     Text(
                       DateFormat(defaultDateFormat).format(_selectedDate!),
@@ -655,7 +307,7 @@ $contents
               actions: [
                 IconButton(
                   icon: const Icon(Icons.login),
-                  onPressed: _oauth2Client == null ? _login : null,
+                  onPressed: _driveSync.oauth2Client == null ? _login : null,
                 ),
                 IconButton(
                   icon: const Icon(Icons.save),
@@ -718,7 +370,7 @@ $contents
                   ),
                   ..._noteFiles.map((file) {
                     return ListTile(
-                      title: Text(_getNotesDescriptor(file.path)),
+                      title: Text(_driveSync.getNotesDescriptor(file.path)),
                       selected: _selectedFile == file,
                       selectedTileColor: Colors.yellow,
                       onTap: () {

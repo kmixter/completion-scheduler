@@ -5,23 +5,14 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:completion_scheduler/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:completion_scheduler/main.dart';
 
 void main() {
-  const Map<String, dynamic> credentials = {
-    'web': {
-      'auth_uri': 'auth_uri',
-      'token_uri': 'token_uri',
-      'client_id': 'client_id',
-      'client_secret': 'client_secret',
-      'redirect_uris': 'redirect_uris'
-    }
-  };
   testWidgets('Add new item and save', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp(credentials: credentials));
+    await tester.pumpWidget(const MyApp());
 
     // Verify that the initial list is empty.
     expect(find.byType(ListTile), findsNothing);
